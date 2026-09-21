@@ -1,4 +1,5 @@
 import gzip
+import json
 import socket
 import time
 import unittest
@@ -10,7 +11,7 @@ from langchain_core.messages import AIMessage
 from url_loader import (normalize_url, public_addresses, load_url, extract_page,
                         decode_body, _request, URLLoadError, MAX_PAGE_BYTES)
 from url_retriever import URLRetriever, URLBuildError, url_selection
-from rag import ask
+from rag import ask, service_evidence_answer, NO_EVIDENCE
 
 HTML = b'''<html><head><title>Learning policy</title></head><body>
 <nav>Unrelated navigation</nav><main><h1>Learning policy</h1>
@@ -242,6 +243,43 @@ class URLContentTests(unittest.TestCase):
         self.assertEqual(app.text_area[0].value, '')
         self.assertTrue(app.chat_input[0].disabled)
         self.assertEqual(len(app.chat_message), 0)
+
+class ServiceEvidenceTests(unittest.TestCase):
+    def source(self):
+        return {'id': 1, 'source': URL, 'section_title': 'Our storage facility',
+                'text': 'The facility has more than 500 indoor self storage and outdoor parking spaces and units.'}
+
+    def answer(self, items, sources=None):
+        model = MagicMock()
+        model.invoke.return_value = AIMessage(content=json.dumps({'items': items}))
+        return service_evidence_answer(model, 'What are all services?', sources or [self.source()])
+
+    def test_verbatim_quote_retains_quantity_and_citation(self):
+        source = self.source()
+        result = self.answer([{'source_id': 1, 'quote': source['text']}])
+        self.assertIn(source['text'], result['answer'])
+        self.assertIn('[1]', result['answer'])
+        self.assertEqual(result['sources'], [source])
+
+    def test_changed_quantity_and_invented_source_are_rejected(self):
+        result = self.answer([{'source_id':1, 'quote':'The facility has more than 500 indoor self storage units.'},
+                              {'source_id':99, 'quote':self.source()['text']}])
+        self.assertEqual(result['answer'], NO_EVIDENCE)
+        self.assertFalse(result['sources'])
+
+    def test_customer_review_is_not_business_service_evidence(self):
+        source = {**self.source(), 'section_title':'Customer Reviews'}
+        result = self.answer([{'source_id':1, 'quote':source['text']}], [source])
+        self.assertEqual(result['answer'], NO_EVIDENCE)
+
+    def test_quote_whitespace_normalized_and_duplicates_removed(self):
+        quote = self.source()['text'].replace(' ', '\n')
+        result = self.answer([{'source_id':1, 'quote':quote}] * 2)
+        self.assertEqual(result['answer'].count('[1]'), 1)
+
+    def test_invalid_json_is_not_displayed_as_an_answer(self):
+        model = MagicMock(); model.invoke.return_value = AIMessage(content='invented answer')
+        self.assertEqual(service_evidence_answer(model,'What services?', [self.source()])['answer'], NO_EVIDENCE)
 
 if __name__ == '__main__':
     unittest.main()

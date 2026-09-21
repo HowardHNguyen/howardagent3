@@ -49,6 +49,8 @@ Users should enter public URLs they may process, never secret/signed URLs. This 
 
 ## Validation
 
-The 23-test suite covers URL validation, DNS/private-network rejection, pinned TLS connections,
+The 28-test suite covers URL validation, DNS/private-network rejection, pinned TLS connections,
 redirect handling, compressed-size limits, extraction, complete table answers, atomic failure rollback, refresh, session isolation,
 and the URL-only Streamlit build/chat/reset flow. Live fetching was also checked against Python.org and Example Domain.
+
+Service-list questions use model-selected source quotations checked verbatim against their cited passages. Unsupported paraphrases and invented references are discarded. Other question types use the general cited-answer pipeline.
