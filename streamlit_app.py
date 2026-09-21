@@ -5,7 +5,7 @@ from uuid import uuid4
 import streamlit as st
 from config import Settings, ConfigurationError
 from llms import create_chat_model, create_embeddings, check_groq, ServiceError
-from url_loader import URLLoadError, MAX_URLS
+from url_loader import URLLoadError, MAX_URLS, MAX_PAGE_MB
 from url_retriever import URLRetriever, URLBuildError, url_selection
 from rag import ask, NO_EVIDENCE
 from answer_rendering import answer_html, ANSWER_CSS
@@ -18,13 +18,14 @@ def reset_session():
     for key in list(st.session_state):
         if key.startswith(('web_', 'urls_')):
             del st.session_state[key]
+    st.session_state.web_schema = 2
     st.session_state.web_id = uuid4().hex
     st.session_state.web_history = []
     st.session_state.web_turns = []
     st.session_state.web_retriever = None
 
 
-if 'web_id' not in st.session_state:
+if 'web_id' not in st.session_state or st.session_state.get('web_schema') != 2:
     reset_session()
 settings = Settings.load()
 st.title('🌐 AI Knowledge Platform · Version 3')
@@ -59,7 +60,7 @@ with chat:
     text = st.text_area('Public webpage URLs — one per line', height=140,
                         placeholder='https://example.com/article', max_chars=21000,
                         key=f'urls_{st.session_state.web_id}')
-    st.caption(f'Up to {MAX_URLS} URLs · 2 MB downloaded and 200,000 extracted characters per page · Only the pages you enter are read')
+    st.caption(f'Up to {MAX_URLS} URLs · {MAX_PAGE_MB} MB downloaded and 200,000 extracted characters per page · Only the pages you enter are read')
     urls, valid = (), True
     try:
         urls = url_selection(text)
@@ -101,10 +102,15 @@ with chat:
                 st.error('Indexing could not finish. The existing knowledge base was not changed. Retry with fewer URLs.')
     if active:
         st.caption(f'Knowledge base ready · {retriever.file_count} webpages · {retriever.chunk_count} passages')
-        with st.expander('Indexed pages and fetch times'):
+        st.caption('Coverage: only the URLs listed above, not every page on those websites. Add service/product page URLs for fuller answers.')
+        with st.expander('Indexed pages, fetch times, and text preview'):
             for page in retriever.pages:
                 st.link_button(page.title, page.url)
-                st.caption(f'Fetched {page.fetched_at} · {sum(len(d.page_content) for d in page.documents):,} characters')
+                extracted = '\n\n'.join(d.page_content for d in page.documents)
+                st.caption(f'Fetched {page.fetched_at} · {len(extracted):,} characters')
+                if len(extracted) < 500:
+                    st.warning('Very little text was extracted. This page may not contain enough detail; try a specific service or article URL.')
+                st.text(extracted[:3000] + ('\n[Preview shortened]' if len(extracted) > 3000 else ''))
     st.divider()
 
     def show_turn(turn):
