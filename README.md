@@ -34,8 +34,8 @@ chat until a successful rebuild. Failed fetches or embedding calls leave the pre
 
 Supported: readable HTML and plain text, including headings, lists, and tables. Unsupported: login-only or
 paywalled pages, JavaScript-only content, images, videos, downloadable PDFs/files, and sites that block automated requests.
-Limits: 2 MB per page after decompression, 200,000 extracted characters per page, 3,000 index chunks,
-20-second request/read deadline per page (OS DNS resolution may take longer), four redirects, and a two-minute
+Limits: 10 MB per page after decompression, 200,000 extracted characters per page, 3,000 index chunks,
+30-second request/read deadline per page (OS DNS resolution may take longer), four redirects, and a two-minute
 budget checked before each page fetch. Indexing/model calls have separate provider timeouts.
 
 Connections use only public IP addresses, standard ports, pinned DNS results, verified TLS with original-host SNI,
@@ -49,6 +49,6 @@ Users should enter public URLs they may process, never secret/signed URLs. This 
 
 ## Validation
 
-The 19-test suite covers URL validation, DNS/private-network rejection, pinned TLS connections,
+The 23-test suite covers URL validation, DNS/private-network rejection, pinned TLS connections,
 redirect handling, compressed-size limits, extraction, complete table answers, atomic failure rollback, refresh, session isolation,
 and the URL-only Streamlit build/chat/reset flow. Live fetching was also checked against Python.org and Example Domain.

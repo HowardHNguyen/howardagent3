@@ -15,9 +15,10 @@ from lxml import html, etree
 from langchain_core.documents import Document
 
 MAX_URLS = 10
-MAX_PAGE_BYTES = 2 * 1024 * 1024
+MAX_PAGE_MB = 10
+MAX_PAGE_BYTES = MAX_PAGE_MB * 1024 * 1024
 MAX_PAGE_CHARS = 200_000
-PAGE_TIMEOUT = 20
+PAGE_TIMEOUT = 30
 MAX_REDIRECTS = 4
 
 
@@ -110,7 +111,7 @@ def _request(url, deadline):
         timer.daemon = True
         timer.start()
         conn.request('GET', urlunsplit(('', '', p.path or '/', p.query, '')),
-                     headers={'User-Agent': 'HowardKnowledgeBot/3.0',
+                     headers={'Host': p.netloc, 'User-Agent': 'HowardKnowledgeBot/3.0',
                               'Accept': 'text/html, application/xhtml+xml, text/plain',
                               'Accept-Encoding': 'identity', 'Connection': 'close'})
         response = conn.getresponse()
@@ -130,7 +131,7 @@ def _request(url, deadline):
         except ValueError:
             raise URLLoadError('The website returned an invalid response size.') from None
         if length > MAX_PAGE_BYTES:
-            raise URLLoadError('The webpage exceeds the 2 MB download limit.')
+            raise URLLoadError('The webpage exceeds the 10 MB download limit.')
         data = bytearray()
         while not response.isclosed():
             remaining = deadline - time.monotonic()
@@ -142,7 +143,7 @@ def _request(url, deadline):
                 break
             data.extend(part)
             if len(data) > MAX_PAGE_BYTES:
-                raise URLLoadError('The webpage exceeds the 2 MB download limit.')
+                raise URLLoadError('The webpage exceeds the 10 MB download limit.')
         if (length and len(data) < length) or time.monotonic() >= deadline:
             raise URLLoadError('The website response was incomplete or timed out.')
         return response.status, headers, decode_body(bytes(data), encoding)
@@ -163,7 +164,7 @@ def decode_body(data, encoding):
         decoder = zlib.decompressobj(31 if encoding == 'gzip' else zlib.MAX_WBITS)
         decoded = decoder.decompress(data, MAX_PAGE_BYTES + 1)
         if len(decoded) > MAX_PAGE_BYTES or decoder.unconsumed_tail:
-            raise URLLoadError('The expanded webpage exceeds the 2 MB limit.')
+            raise URLLoadError('The expanded webpage exceeds the 10 MB limit.')
         if not decoder.eof or decoder.unused_data:
             raise URLLoadError('The website returned an incomplete or unsupported compressed page.')
         return decoded
@@ -187,25 +188,32 @@ def extract_page(data, content_type, requested_url, final_url):
         except (etree.ParserError, ValueError):
             raise URLLoadError('The webpage could not be parsed.') from None
         title = ' '.join(root.xpath('//title/text()')).strip()[:300] or urlsplit(final_url).hostname
-        for node in root.xpath('//script|//style|//noscript|//template|//nav|//header|//footer|//aside|//form|//svg|//*[@hidden]|//*[@aria-hidden="true"]'):
+        for node in root.xpath('//script|//style|//noscript|//template|//nav|//*[@role="navigation"]|//footer|//aside|//form|//svg|//*[@hidden]|//*[@aria-hidden="true"]'):
             node.drop_tree()
-        mains = root.xpath('//main|//article|//*[@role="main"]')
-        body = max(mains, key=lambda n: len(n.text_content())) if mains else root
+        # Article tags often represent sibling service cards, not a whole page.
+        mains = root.xpath('//main|//*[@role="main"]')
+        bodies = root.xpath('//body')
+        body = mains[0] if len(mains) == 1 else (bodies[0] if bodies else root)
+        for node in list(body.iter()):
+            if not isinstance(node.tag, str):
+                continue
+            classes = set((node.get('class', '') + ' ' + node.get('id', '')).lower().split())
+            if classes & {'cookie-banner', 'consent-banner', 'cmplz-cookiebanner', 'onetrust-banner-sdk'} and node is not body:
+                node.drop_tree()
         docs, buffer, heading, table_id = [], [], title, 0
         def flush():
             if buffer:
                 docs.append(Document(page_content='\n\n'.join(buffer),
                     metadata={**metadata, 'section_title': heading}))
                 buffer.clear()
-        for node in body.iter():
+        def walk(node):
+            nonlocal heading, table_id
             if not isinstance(node.tag, str):
-                continue
+                return
             tag = node.tag.lower()
-            if any(a.tag in ('table', 'p', 'li', 'pre', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6') for a in node.iterancestors() if a is not body):
-                continue
             text = ' '.join(node.text_content().split())
             if not text:
-                continue
+                return
             if tag in ('h1', 'h2', 'h3', 'h4', 'h5', 'h6'):
                 flush()
                 heading = text[:500]
@@ -220,6 +228,15 @@ def extract_page(data, content_type, requested_url, final_url):
                         'section_title': heading, 'block_type': 'table', 'table_id': str(table_id)}))
             elif tag in ('p', 'li', 'pre', 'blockquote', 'dt', 'dd'):
                 buffer.append(text)
+            else:
+                # Preserve text in div/span-based service cards without duplicating descendants.
+                if node.text and node.text.strip():
+                    buffer.append(' '.join(node.text.split()))
+                for child in node:
+                    walk(child)
+                    if child.tail and child.tail.strip():
+                        buffer.append(' '.join(child.tail.split()))
+        walk(body)
         flush()
         if not docs:
             text = ' '.join(body.text_content().split())
@@ -253,5 +270,9 @@ def load_url(value):
         raise URLLoadError('The website redirected too many times.')
     except URLLoadError:
         raise
+    except (TimeoutError, socket.timeout):
+        raise URLLoadError('The website did not respond in time. It may be unavailable or block automated access; try again later or use another public page.') from None
+    except ssl.SSLCertVerificationError:
+        raise URLLoadError('The website TLS certificate could not be verified. The site owner needs to fix its HTTPS configuration.') from None
     except (OSError, http.client.HTTPException, UnicodeError, ValueError):
         raise URLLoadError('The webpage could not be fetched securely (connection, certificate, or timeout error).') from None

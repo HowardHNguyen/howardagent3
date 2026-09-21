@@ -101,8 +101,14 @@ class URLSafetyTests(unittest.TestCase):
         self.assertEqual(connect.call_args.args[0], ('93.184.216.34', 443))
         self.assertEqual(connection.call_args.args, ('example.com', 443))
         self.assertEqual(context.wrap_socket.call_args.kwargs['server_hostname'], 'example.com')
+        self.assertEqual(conn.request.call_args.kwargs['headers']['Host'], 'example.com')
         self.assertEqual(data, HTML)
         response.close.assert_called_once()
+
+    def test_read_timeout_has_specific_user_message(self):
+        with patch('url_loader._request', side_effect=TimeoutError('read timeout')):
+            with self.assertRaisesRegex(URLLoadError, 'did not respond in time'):
+                load_url(URL)
 
     def test_response_limits_and_types(self):
         for headers in ([('Content-Type','application/pdf')],
@@ -127,6 +133,43 @@ class URLContentTests(unittest.TestCase):
         self.assertIn('3 | Design', table.page_content)
         self.assertEqual(table.metadata['section_title'], 'The 3 Learning Topics')
         self.assertEqual(result.title, 'Learning policy')
+
+    def test_sibling_service_articles_and_header_headings_are_all_preserved(self):
+        content = b"""<html><body><header><h1>Storage services</h1></header>
+        <article><header><h2>RV storage</h2></header><p>Covered spaces for recreational vehicles.</p></article>
+        <article><h2>Boat storage</h2><p>Secure spaces for boats and trailers with daily access.</p></article>
+        <article><h2>Self storage</h2><p>Indoor storage units for household goods and office supplies.</p></article>
+        </body></html>"""
+        result = extract_page(content, 'text/html', URL, URL)
+        text = '\n'.join(d.page_content for d in result.documents)
+        for name in ('Storage services', 'RV storage', 'Boat storage', 'Self storage'):
+            self.assertIn(name, text)
+        self.assertEqual(text.count('Covered spaces'), 1)
+
+    def test_div_and_span_content_is_not_lost_beside_paragraphs(self):
+        content = b"""<html><body><main><p>Our company provides storage facilities for customers.</p>
+        <div>Service offerings <span>Trailer parking</span> and <span>Boat storage</span></div>
+        <div class="cookie-banner">Unrelated tracking consent</div></main></body></html>"""
+        result = extract_page(content, 'text/html', URL, URL)
+        text = '\n'.join(d.page_content for d in result.documents)
+        self.assertIn('Trailer parking', text)
+        self.assertIn('Boat storage', text)
+        self.assertNotIn('Unrelated tracking', text)
+
+    def test_large_html_shell_with_small_article_can_be_indexed(self):
+        content = b'<html><script>' + b'x' * (3 * 1024 * 1024) + b'</script><main>' + HTML + b'</main></html>'
+        response = MagicMock(status=200)
+        response.getheaders.return_value = [('Content-Type', 'text/html'), ('Content-Length', str(len(content)))]
+        parts = [content[i:i+65536] for i in range(0, len(content), 65536)]
+        response.isclosed.side_effect = [False] * len(parts) + [True]
+        response.read1.side_effect = parts
+        conn = MagicMock(); conn.getresponse.return_value = response
+        with patch('url_loader.public_addresses', return_value=['93.184.216.34']), \
+             patch('url_loader.socket.create_connection'), \
+             patch('url_loader.http.client.HTTPConnection', return_value=conn), \
+             patch('url_loader.ssl.create_default_context'):
+            result = load_url(URL)
+        self.assertIn('500 credits', '\n'.join(d.page_content for d in result.documents))
 
     def test_empty_or_javascript_only_rejected(self):
         with self.assertRaises(URLLoadError):
