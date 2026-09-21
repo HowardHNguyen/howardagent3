@@ -1,46 +1,36 @@
-"""
-Environment configuration helper.
-
-This app can run locally or on Streamlit Cloud.
-
-Local:
-  - export GROQ_API_KEY=...
-  - export OPENAI_API_KEY=...
-
-Streamlit Cloud:
-  - add secrets in the app settings:
-      GROQ_API_KEY = "..."
-      OPENAI_API_KEY = "..."
-"""
-from __future__ import annotations
-
+"""Read deployment settings without logging or copying secrets into global state."""
 import os
+from dataclasses import dataclass, field
 
 
-def set_environment() -> None:
-    """
-    Ensure required API keys are available in os.environ.
-    Tries (in order):
-      1) existing environment variables
-      2) Streamlit secrets (if running under Streamlit)
-    """
-    try:
-        import streamlit as st  # type: ignore
-        secrets = getattr(st, "secrets", None)
-    except Exception:
-        secrets = None
+class ConfigurationError(Exception):
+    pass
 
-    def _set_from_secrets(key: str) -> None:
-        if os.environ.get(key):
-            return
-        if secrets is None:
-            return
+
+def setting(name: str, default: str = "") -> str:
+    value = os.environ.get(name)
+    if value is None:
         try:
-            val = secrets.get(key)
-        except Exception:
-            val = None
-        if val:
-            os.environ[key] = str(val)
+            import streamlit as st
+            value = st.secrets.get(name, default)
+        except (FileNotFoundError, KeyError):
+            value = default
+    return str(value or default).strip()
 
-    _set_from_secrets("GROQ_API_KEY")
-    _set_from_secrets("OPENAI_API_KEY")
+
+@dataclass(frozen=True)
+class Settings:
+    groq_key: str = field(repr=False)
+    openai_key: str = field(repr=False)
+    model: str = "openai/gpt-oss-20b"
+
+    @classmethod
+    def load(cls):
+        return cls(setting("GROQ_API_KEY"), setting("OPENAI_API_KEY"),
+                   setting("GROQ_MODEL", "openai/gpt-oss-20b"))
+
+    def require(self, provider: str):
+        key = self.groq_key if provider == "Groq" else self.openai_key
+        if not key:
+            raise ConfigurationError(f"Configure {provider.upper()}_API_KEY in Streamlit app secrets.")
+        return key

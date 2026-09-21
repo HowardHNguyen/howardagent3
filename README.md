@@ -1,138 +1,54 @@
-# Marketing Operations AI Assistant (Agentic Prototype)
+# Version 3 — URL knowledge assistant
 
-## Overview
+Version 2 remains the file-upload app at https://howardagent2.streamlit.app/ using `streamlit_app.py`.
+Version 3 is a separate Streamlit app using `streamlit_app.py`. It has no file uploader.
+This repository contains the URL-only Version 3 app. Version 2 remains in the separate genai-langchain repository.
 
-This application is a **Marketing Operations AI Assistant (Agentic Prototype)** designed to support Marketing teams by providing fast, consistent, and reliable answers grounded in **internal documentation, standards, and operating models**.
+## Deploy separately
 
-The app demonstrates how **agentic AI** can be applied practically within a MarTech context—helping teams clarify definitions, summarize guidance, and draft internal-ready artifacts—while remaining aligned with enterprise governance and compliance expectations.
+In Streamlit Community Cloud, create a **new app** with:
 
-> This is an exploratory, internal prototype intended to demonstrate feasibility and inform a broader Agentic AI strategy for Marketing.
+- Repository: `HowardHNguyen/howardagent3`
+- Branch: `main`
+- Main file: `streamlit_app.py`
+- Custom subdomain: `howardagent3` (subject to availability)
+- Python: `3.12`
+- Secrets: set `OPENAI_API_KEY`, `GROQ_API_KEY`, and optionally `GROQ_MODEL` (default `openai/gpt-oss-20b`). Configure them through Streamlit's secrets editor, never GitHub.
 
----
+Do not change Version 2's entry point or URL. A new Streamlit deployment needs its own secrets settings.
+See [Streamlit deployment instructions](https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/deploy).
 
-## What this app is (and is not)
+## Run locally
 
-### What it *is*
-- A **Retrieval-Augmented Generation (RAG)** application
-- Grounded entirely in **user-provided internal documents**
-- Designed to reduce knowledge friction and enforce consistency
-- Built to demonstrate **rapid prototyping → production evolution**
+```sh
+pip install -r requirements.txt
+streamlit run streamlit_app.py
+```
 
-### What it *is not*
-- Not a replacement for Microsoft Copilot
-- Not trained on proprietary company data
-- Not a general-purpose chatbot
-- Not a production system (yet)
+## Use
 
----
+Paste up to 10 public HTTP(S) URLs, one per line, and click **Build / Refresh Knowledge Base**.
+The app reads only those pages, not their links. Ask questions and inspect the cited passages and source links.
+Each successful build fetches fresh snapshots and clears old conversation. Changing the selection disables
+chat until a successful rebuild. Failed fetches or embedding calls leave the previous index unchanged.
 
-## Key capabilities
+Supported: readable HTML and plain text, including headings, lists, and tables. Unsupported: login-only or
+paywalled pages, JavaScript-only content, images, videos, downloadable PDFs/files, and sites that block automated requests.
+Limits: 2 MB per page after decompression, 200,000 extracted characters per page, 3,000 index chunks,
+20-second request/read deadline per page (OS DNS resolution may take longer), four redirects, and a two-minute
+budget checked before each page fetch. Indexing/model calls have separate provider timeouts.
 
-- Upload internal documents (PDF, DOCX, TXT)
-- Parse and index content into a searchable knowledge base
-- Ask natural-language questions grounded in uploaded content
-- Generate clear, actionable responses aligned with internal standards
-- Demonstrate an **agentic loop**:
-  
-  **Retrieve → Reason → Respond**
+Connections use only public IP addresses, standard ports, pinned DNS results, verified TLS with original-host SNI,
+and revalidated redirects. They carry no cookies or credentials and ignore environment proxy configuration.
+Gzip/deflate expansion is bounded. Only validated source URLs become clickable links; model-generated links remain disabled.
+Page text is untrusted reference material, not instructions. No browsing/action tools are exposed to the model.
 
----
+Each session owns its own in-memory index and history; no webpage/embedding cache is written to disk by the app.
+The website receives fetch requests, OpenAI processes text for embeddings, and Groq processes relevant passages and questions.
+Users should enter public URLs they may process, never secret/signed URLs. This is a public prototype, not an authenticated enterprise service.
 
-## How this complements Microsoft Copilot
+## Validation
 
-Microsoft Copilot excels at:
-- General enterprise productivity
-- Cross-tool assistance (Outlook, Teams, PowerPoint, Excel)
-- Broad language understanding
-
-This assistant focuses on:
-- Marketing-specific standards and definitions
-- Internal operating models and workflows
-- Consistency, governance, and domain-aware reasoning
-
-Together, they form a layered approach:
-- **Microsoft Copilot** → general enterprise productivity  
-- **Marketing Operations AI Assistant** → domain-specific enablement
-
----
-
-## High-level architecture
-
-The application is structured into four logical layers:
-
-1. **User Interface**
-   - Streamlit-based chat and document management UI
-
-2. **Knowledge Ingestion**
-   - Document parsing (PDF, DOCX, TXT)
-   - Text chunking and normalization
-   - Embedding generation
-
-3. **Agentic RAG Pipeline**
-   - Retrieval of relevant document chunks
-   - LLM reasoning using retrieved context
-   - Response generation aligned to internal content
-
-4. **Model Layer**
-   - LLM for natural language reasoning
-   - Embeddings model for semantic search
-
-See the **Architecture & Technical Details** tab in the app for interactive data flow diagrams.
-
----
-
-## Data handling & storage (important)
-
-### Current prototype behavior
-- Uploaded files are held in **session memory**
-- Files are written briefly to a **temporary filesystem** for parsing
-- Temporary files are deleted immediately after processing
-- Parsed text and embeddings are stored **in memory only**
-- No data is persisted across sessions or app restarts
-
-> When the app restarts, all uploaded content is discarded.
-
-This design intentionally keeps the prototype **low-risk** and avoids unintended data retention.
-
----
-
-## Production evolution (future considerations)
-
-A production-ready version would explicitly introduce:
-- Persistent vector storage (e.g., Azure AI Search, FAISS, Pinecone)
-- Enterprise authentication (SSO / RBAC)
-- Source citations and traceability
-- Audit logs and observability
-- Scheduled ingestion from systems such as SharePoint or Confluence
-- Governance controls aligned with HIPAA / PHI / PII policies
-
-These are **intentional design choices**, not omissions.
-
----
-
-## Running the app locally
-
-- pip install -r requirements.txt
-- streamlit run streamlit_app.py
-
-## Required environment variables
-
-Set via environment variables or Streamlit secrets:
-- OPENAI_API_KEY
-- GROQ_API_KEY
-
-## Intended use
-
-This app is intended for:
-- Demonstrating agentic AI concepts
-- Rapid prototyping and experimentation
-- Stakeholder review and feedback
-- Informing AI/ML roadmap decisions
-
-It is not intended for production use without additional governance, security, and integration work.
-
----
-
-## License & usage note
-
-© 2025 Howard Nguyen, PhD. Prototype provided for demonstration and internal evaluation purposes only.
+The 19-test suite covers URL validation, DNS/private-network rejection, pinned TLS connections,
+redirect handling, compressed-size limits, extraction, complete table answers, atomic failure rollback, refresh, session isolation,
+and the URL-only Streamlit build/chat/reset flow. Live fetching was also checked against Python.org and Example Domain.
